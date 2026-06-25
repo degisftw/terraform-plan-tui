@@ -1,0 +1,72 @@
+# Medium example — the "before" world. Applied first to seed prior state.
+# Not a .tf file, so terraform ignores it except when generate.sh activates it.
+
+resource "random_id" "seed" {
+  byte_length = 8
+}
+
+resource "random_pet" "org" {
+  length = 1
+}
+
+# Only 5 services here (after has 6).
+resource "random_pet" "service" {
+  count  = 5
+  length = 2
+  keepers = {
+    seed = random_id.seed.hex
+  }
+}
+
+# rotation v1 here (after bumps to v2 → replace).
+resource "random_string" "api_key" {
+  count   = 4
+  length  = 24
+  special = false
+  keepers = {
+    rotation = "v1"
+    org      = random_pet.org.id
+  }
+}
+
+# Narrower port range (after widens max → replace).
+resource "random_integer" "port" {
+  count = 5
+  min   = 8000
+  max   = 9000
+  keepers = {
+    seed = random_id.seed.hex
+  }
+}
+
+# 4 db passwords here (after drops to 3 → one delete).
+resource "random_password" "db_password" {
+  count   = 4
+  length  = 20
+  special = true
+  keepers = {
+    seed = random_id.seed.hex
+  }
+}
+
+# Removed entirely in the after world → deletes.
+resource "random_shuffle" "legacy" {
+  count = 2
+  input = ["alpha", "beta", "gamma", "delta"]
+}
+
+resource "random_password" "master" {
+  length = 32
+  keepers = {
+    api_key = random_string.api_key[0].id
+    org     = random_pet.org.id
+  }
+}
+
+resource "random_pet" "release" {
+  length = 3
+  keepers = {
+    service = random_pet.service[0].id
+    port    = random_integer.port[0].result
+  }
+}

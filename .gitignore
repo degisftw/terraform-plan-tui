@@ -1,0 +1,14 @@
+# compiled binary (anchored to repo root so it doesn't shadow cmd/tfplantui/)
+/tfplantui
+
+# terraform working files left behind by examples/generate.sh
+# (plan.json IS committed so the examples run without terraform)
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/*.tfplan
+**/.after.tf.bak
+
+# the active config generate.sh swaps in is regenerated; keep the canonical main.tf
+**/main.tf.bak
