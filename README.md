@@ -1,9 +1,11 @@
 # tfplantui
 
-An interactive terminal UI for reading HashiCorp Terraform plans.
+An interactive terminal UI for reading Terraform plans.
+
+![tfplantui demo](docs/demo.gif)
 
 A Terraform configuration is a **graph**, and a plan is a **proposed change over
-that graph**. Scrolling through thousands of lines of `terraform plan` output
+that graph**. Scrolling through hundrends of lines of `terraform plan` output
 makes that structure almost impossible to see. `tfplantui` renders the plan as
 its dependency graph — laid out in columns by dependency depth — and lets you
 walk it with the arrow keys, expanding any resource to see a color-coded
@@ -21,11 +23,12 @@ before → after diff of its attributes.
 
 ## Why
 
-`terraform plan` answers *"what will change?"* but not *"how do these changes
-relate?"*. When a single edited value forces a cascade of replacements, the flat
-output gives you no way to follow the blast radius. `tfplantui` is built around
-one idea: **let a human reason about a plan by navigating its graph**, not by
-reading a transcript.
+`terraform plan` gives you its answer as **plain text** — and for any real
+change that means hundreds of lines of diff to scroll through, or the raw plan
+JSON to parse yourself. Either way, *you* are the one reconstructing the plan's
+shape in your head. `tfplantui` does that for you: it turns the plan into a
+**graph you can navigate**, so a human can visualize and reason through every
+change at once instead of reading a transcript.
 
 - **Dependency layout.** Resources with no dependencies sit on the left; each
   column to the right depends on the one before it. Moving `←`/`→` follows the
