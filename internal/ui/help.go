@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/omarismail/tfplantui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
 // renderHelp draws the full-screen key reference, action legend, and a short

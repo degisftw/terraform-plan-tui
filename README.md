@@ -46,7 +46,7 @@ change at once instead of reading a transcript.
 As a CLI:
 
 ```sh
-go install github.com/omarismail/tfplantui/cmd/tfplantui@latest
+go install github.com/omarismail/terraform-plan-tui/cmd/tfplantui@latest
 # or build from a checkout
 go build -o tfplantui ./cmd/tfplantui
 ```
@@ -62,7 +62,7 @@ behind its own flag. Hand it a plan file and the rest — loading binary plans v
 you:
 
 ```go
-import "github.com/omarismail/tfplantui"
+import "github.com/omarismail/terraform-plan-tui"
 
 // In your own command / flag handler:
 func runPlanExplorer(planPath string) error {

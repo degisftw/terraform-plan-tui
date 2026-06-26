@@ -1,4 +1,4 @@
-module github.com/omarismail/tfplantui
+module github.com/omarismail/terraform-plan-tui
 
 go 1.24.2
 

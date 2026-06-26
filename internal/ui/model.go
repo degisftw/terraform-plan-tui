@@ -3,7 +3,7 @@ package ui
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/omarismail/tfplantui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
 type viewMode int

@@ -2,7 +2,7 @@ package ui
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	"github.com/omarismail/tfplantui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
 // Palette. Action colors carry all the meaning; everything else is neutral.

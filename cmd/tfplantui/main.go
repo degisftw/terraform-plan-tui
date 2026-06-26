@@ -1,7 +1,7 @@
 // Command tfplantui is an interactive terminal UI for exploring a Terraform
 // plan as a dependency graph with color-coded, expandable attribute diffs.
 //
-// It is a thin wrapper over the github.com/omarismail/tfplantui package; the
+// It is a thin wrapper over the github.com/omarismail/terraform-plan-tui package; the
 // loading, parsing, and rendering all live there so other CLIs can reuse them.
 package main
 
@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/omarismail/tfplantui"
+	"github.com/omarismail/terraform-plan-tui"
 )
 
 const usage = `tfplantui — an interactive terminal UI for Terraform plans

@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/omarismail/tfplantui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
 var ansiRe = regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")

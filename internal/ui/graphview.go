@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/omarismail/tfplantui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
 // Layout constants for the columnar graph.

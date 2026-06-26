@@ -24,8 +24,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/omarismail/tfplantui/internal/tfplan"
-	"github.com/omarismail/tfplantui/internal/ui"
+	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
+	"github.com/omarismail/terraform-plan-tui/internal/ui"
 )
 
 // defaultPlanName is the source label shown in the UI when none can be derived
