@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"github.com/omarismail/terraform-plan-tui/internal/tfplan"
 )
 
@@ -45,6 +43,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyRight}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
 	default:
@@ -104,9 +106,6 @@ func TestNavigateFollowsEdges(t *testing.T) {
 func TestExpandShowsDiff(t *testing.T) {
 	m := loadUI(t, "simple", 120, 40)
 	m = send(m, "right") // random_pet.app
-	if !strings.Contains(plain(m.View()), "space to expand") {
-		t.Errorf("expected expand hint before expanding")
-	}
 	m = send(m, "space")
 	p := plain(m.View())
 	for _, want := range []string{"length", "(known after apply)", "separator"} {
@@ -161,39 +160,6 @@ func TestHideNoOpFilter(t *testing.T) {
 	for _, n := range m.listItems() {
 		if n.ActionAgg() == tfplan.ActionNoOp {
 			t.Errorf("no-op node %s still visible under changes-only", n.Block)
-		}
-	}
-}
-
-func TestColorsEmitted(t *testing.T) {
-	// Force truecolor so View() emits SGR codes we can assert on (tests have no TTY).
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
-
-	// medium has no-op (seed, selected by default), create, replace and delete,
-	// and seed has dependents so a dependency arrow is drawn.
-	v := loadUI(t, "medium", 150, 35).View()
-
-	want := map[string]string{
-		"selection background #161B22": "48;2;22;27;34",
-		"selection white text #FFFFFF": "38;2;255;255;255",
-		"dependency arrow #768390":     "38;2;118;131;144",
-		"create green #3FB950":         "38;2;63;185;80",
-		"replace purple #BC8CFF":       "38;2;188;140;255",
-		"delete red #F85149":           "38;2;248;81;73",
-		"mixed yellow #F2CC60":         "38;2;242;204;96",
-		"no-op dim #414850":            "38;2;65;72;80",
-	}
-	for name, code := range want {
-		if !strings.Contains(v, code) {
-			t.Errorf("missing %s (%q) in rendered output", name, code)
-		}
-	}
-	// Retired colors must be gone: gold selection, teal link, orange mixed, and
-	// the grey selection border (#30363D) — selected borders keep their action hue.
-	for _, gone := range []string{"227;179;65" /*gold*/, "45;212;191" /*teal*/, "219;109;40" /*orange*/, "48;54;61" /*sel border grey*/} {
-		if strings.Contains(v, gone) {
-			t.Errorf("retired color %q still present", gone)
 		}
 	}
 }

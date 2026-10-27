@@ -20,6 +20,9 @@ const (
 // renderGraph lays out the dependency graph as columns of cards, windowed to the
 // visible band, with just-in-time dependency arrows drawn beside the selection.
 func (m Model) renderGraph() string {
+	if m.showStreams {
+		return m.renderStreamGraph()
+	}
 	bodyH := m.bodyHeight()
 	cardsH := bodyH - 1
 	if cardsH < 1 {
@@ -51,14 +54,14 @@ func (m Model) renderGraph() string {
 		} else {
 			label += fmt.Sprintf(" · %d", n)
 		}
-		headerCells = append(headerCells, m.styles.faint.Render(centerPad(label, cardOuter)))
+		headerCells = append(headerCells, m.styles.dim.Bold(true).Render(centerPad(label, cardOuter)))
 	}
 	out := []string{strings.Join(headerCells, spaces)}
 
 	// Each column rendered windowed: only cards intersecting the visible band.
 	bufs := make([][]string, 0, endCol-startCol)
 	for c := startCol; c < endCol; c++ {
-		bufs = append(bufs, m.renderColumnWindow(c, sel, lineScroll, cardsH))
+		bufs = append(bufs, m.renderColumnWindow(c, sel, lineScroll, cardsH, cardOuter))
 	}
 
 	// Just-in-time dependency arrows from the selected node into the gaps beside it.
@@ -89,6 +92,15 @@ func (m Model) renderGraph() string {
 // columnCenters maps each visible row in a column to the screen-Y of its card's
 // vertical center (within the cards area; may fall outside [0,cardsH)).
 func (m Model) columnCenters(c, lineScroll int) map[int]int {
+	if m.showStreams {
+		centers := map[int]int{}
+		for _, card := range m.streamColumnCards(c) {
+			if card.idx == m.shownInstance(card.node) {
+				centers[card.node.Row] = card.y - lineScroll + card.height/2
+			}
+		}
+		return centers
+	}
 	centers := map[int]int{}
 	y := 0
 	for _, r := range m.visibleRows(c) {
@@ -247,6 +259,17 @@ func junctionChar(up, down, left, right bool) rune {
 // graphLineScroll computes the vertical line offset that keeps the selected
 // card visible within the focused column.
 func (m Model) graphLineScroll(cardsH int) int {
+	if m.showStreams {
+		cards := m.streamColumnCards(m.col)
+		total, start, height := 0, 0, 0
+		for _, card := range cards {
+			total = card.y + card.height
+			if card.node.Row == m.row && card.idx == m.shownInstance(card.node) {
+				start, height = card.y, card.height
+			}
+		}
+		return scrollFor(start, height, total, cardsH)
+	}
 	vrows := m.visibleRows(m.col)
 	vi := indexOf(vrows, m.row)
 	if vi < 0 {
@@ -267,9 +290,12 @@ func (m Model) graphLineScroll(cardsH int) int {
 
 // renderColumnWindow returns exactly cardsH lines for one column, rendering only
 // the cards whose vertical extent intersects [lineScroll, lineScroll+cardsH).
-func (m Model) renderColumnWindow(c int, sel *tfplan.Node, lineScroll, cardsH int) []string {
+func (m Model) renderColumnWindow(c int, sel *tfplan.Node, lineScroll, cardsH, width int) []string {
+	if m.showStreams {
+		return m.renderStreamColumnWindow(c, sel, lineScroll, cardsH, width)
+	}
 	buf := make([]string, cardsH)
-	blank := strings.Repeat(" ", cardOuter)
+	blank := strings.Repeat(" ", width)
 	for i := range buf {
 		buf[i] = blank
 	}
@@ -284,7 +310,7 @@ func (m Model) renderColumnWindow(c int, sel *tfplan.Node, lineScroll, cardsH in
 		if y >= lineScroll+cardsH { // entirely below the window
 			break
 		}
-		for j, line := range strings.Split(m.renderCardBox(n, sel), "\n") {
+		for j, line := range strings.Split(m.renderCardBox(n, sel, width), "\n") {
 			if pos := y + j - lineScroll; pos >= 0 && pos < cardsH {
 				buf[pos] = line
 			}
@@ -297,9 +323,9 @@ func (m Model) renderColumnWindow(c int, sel *tfplan.Node, lineScroll, cardsH in
 // cardContentLines builds the inner (border-free) lines of a card. The line
 // COUNT does not depend on `selected` (which only bolds the label), so it is
 // safe to use for height measurement.
-func (m Model) cardContentLines(n *tfplan.Node, selected bool) []string {
+func (m Model) cardContentLines(n *tfplan.Node, selected bool, width int) []string {
 	act := n.ActionAgg()
-	textW := cardInner - 2 // padding 1 on each side
+	textW := max(1, width-4) // borders and one cell of padding on each side
 
 	badge := ""
 	if n.Count() > 1 {
@@ -310,7 +336,7 @@ func (m Model) cardContentLines(n *tfplan.Node, selected bool) []string {
 		avail = 1
 	}
 	label := clip(n.Label(), avail)
-	// Three-tier emphasis: selected = bright white; no-op = recedes; else normal.
+	// Unchanged resources are quieter, but their names remain readable.
 	labelStyle := m.styles.text
 	switch {
 	case selected:
@@ -325,7 +351,7 @@ func (m Model) cardContentLines(n *tfplan.Node, selected bool) []string {
 		idx := m.shownInstance(n)
 		inst := n.Instances[idx]
 		if n.Count() > 1 {
-			info := fmt.Sprintf("instance %d/%d %s  [ ]", idx+1, n.Count(), inst.Action.Symbol())
+			info := fmt.Sprintf("instance %d/%d %s  [ ] / Tab", idx+1, n.Count(), inst.Action.Symbol())
 			lines = append(lines, m.styles.faint.Render(clip(info, textW)))
 		}
 		diff := inst.Diff(m.showUnchanged)
@@ -336,26 +362,24 @@ func (m Model) cardContentLines(n *tfplan.Node, selected bool) []string {
 			lines = append(lines, renderDiffLine(l, textW))
 		}
 	}
+	for i, line := range lines {
+		lines[i] = clipANSI(line, textW)
+	}
 	return lines
 }
 
 func (m Model) cardHeight(n *tfplan.Node) int {
-	return len(m.cardContentLines(n, false)) + 2 // + top & bottom border
+	if m.showStreams {
+		height := 0
+		for _, idx := range m.visibleInstanceIndices(n) {
+			height += m.streamCardHeight(n, idx)
+		}
+		return height
+	}
+	return len(m.cardContentLines(n, false, cardOuter)) + 2 // + top & bottom border
 }
 
-func (m Model) renderCardBox(n, sel *tfplan.Node) string {
+func (m Model) renderCardBox(n, sel *tfplan.Node, width int) string {
 	selected := n == sel
-	// The border and the action symbol always keep their action color. Selection
-	// is shown only by filling the interior dark and brightening the label — the
-	// boundary hue never changes as the cursor moves.
-	style := lipgloss.NewStyle().
-		Width(cardInner).
-		Padding(0, 1).
-		BorderForeground(actionColor(n.ActionAgg()))
-	if selected {
-		style = style.Border(lipgloss.ThickBorder()).Background(colSelBg)
-	} else {
-		style = style.Border(lipgloss.RoundedBorder())
-	}
-	return style.Render(strings.Join(m.cardContentLines(n, selected), "\n"))
+	return renderSurface(m.resourceCardStyle(width, selected), strings.Join(m.cardContentLines(n, selected, width), "\n"))
 }

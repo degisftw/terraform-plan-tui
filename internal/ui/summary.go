@@ -56,7 +56,7 @@ func PrintSummary(w io.Writer, g *tfplan.Graph) {
 			return nodes[i].Block < nodes[j].Block
 		})
 
-		style := lipgloss.NewStyle().Foreground(summaryColor(act)).Bold(true)
+		style := lipgloss.NewStyle().Foreground(actionColor(act)).Bold(true)
 		fmt.Fprintln(w, style.Render(fmt.Sprintf("%s %s (%d)", act.Symbol(), titleCase(act.Label()), len(nodes))))
 		for _, n := range nodes {
 			line := "  " + style.Render(act.Symbol()) + " " + n.Label()
@@ -71,16 +71,6 @@ func PrintSummary(w io.Writer, g *tfplan.Graph) {
 		}
 		fmt.Fprintln(w)
 	}
-}
-
-// summaryColor is actionColor with one deliberate override: the summary lists
-// no-op resources to be read, so they use the readable dim grey rather than the
-// near-invisible colNoOp the graph uses to make unchanged cards recede.
-func summaryColor(a tfplan.Action) lipgloss.Color {
-	if a == tfplan.ActionNoOp {
-		return colDim
-	}
-	return actionColor(a)
 }
 
 // titleCase upper-cases the first letter of s.

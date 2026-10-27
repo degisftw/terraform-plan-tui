@@ -21,28 +21,30 @@ func (m Model) View() string {
 		return "loading plan…"
 	}
 	if m.showHelp {
-		return m.renderHelp()
+		return renderSurface(m.styles.screen, m.renderHelp())
 	}
 
 	var body string
-	if m.mode == modeList {
+	if m.detailLines != nil {
+		body = m.renderDetail()
+	} else if m.mode == modeList {
 		body = m.renderList()
 	} else {
 		body = m.renderGraph()
 	}
 
-	return strings.Join([]string{
+	return renderSurface(m.styles.screen, strings.Join([]string{
 		m.renderHeader(),
 		body,
 		m.renderFooter(),
-	}, "\n")
+	}, "\n"))
 }
 
 // --- header -----------------------------------------------------------------
 
 func (m Model) renderHeader() string {
 	s := m.styles
-	title := s.header.Render("tfplantui")
+	title := s.header.Bold(true).Render(" tfplantui ")
 	path := m.g.PlanPath
 	if path == "" {
 		path = "plan"
@@ -52,21 +54,29 @@ func (m Model) renderHeader() string {
 		meta += s.faint.Render("  ·  terraform " + m.g.TerraformVersion)
 	}
 
-	modeName := "graph"
+	modeName := "GRAPH"
 	if m.mode == modeList {
-		modeName = "list"
+		modeName = "LIST"
 	}
-	flags := "  " + s.faint.Render("["+modeName+"]")
+	flags := s.badge.Render(modeName)
+	if m.detailLines != nil {
+		flags += " " + s.key.Render("FOCUS")
+	}
+	if m.showStreams {
+		flags += " " + s.badge.Render("ALL STREAMS")
+	}
 	if m.hideNoOp {
-		flags += " " + s.dim.Render("changes-only")
+		flags += " " + s.badge.Render("changes only")
 	}
 	if m.showUnchanged {
-		flags += " " + s.dim.Render("+unchanged")
+		flags += " " + s.badge.Render("+unchanged")
 	}
-	line1 := clipANSI(title+meta+flags, m.width)
-	return pad(line1, m.width) + "\n" +
-		pad(m.renderSummary(), m.width) + "\n" +
-		pad(m.renderLegend(), m.width)
+	left := clipANSI(title+meta, max(0, m.width-lipgloss.Width(flags)-2))
+	gap := max(1, m.width-lipgloss.Width(left)-lipgloss.Width(flags))
+	line1 := left + strings.Repeat(" ", gap) + flags
+	return padANSI(line1, m.width) + "\n" +
+		padANSI(m.renderSummary(), m.width) + "\n" +
+		padANSI(m.renderLegend(), m.width)
 }
 
 // renderLegend is a dense, single-line key for the icons actually present.
@@ -75,6 +85,10 @@ func (m Model) renderLegend() string {
 	for _, a := range m.present {
 		sym := lipgloss.NewStyle().Foreground(actionColor(a)).Bold(true).Render(a.Symbol())
 		parts = append(parts, sym+" "+m.styles.dim.Render(legendWord(a)))
+	}
+	if m.showStreams {
+		scope := m.styles.dim.Render("─▶ confirmed refs") + "    " + m.styles.faint.Render("? block scope")
+		return clipANSI(scope+"    "+strings.Join(parts, "    "), m.width)
 	}
 	arrow := lipgloss.NewStyle().Foreground(colArrow).Render("─▶")
 	parts = append(parts, arrow+" "+m.styles.dim.Render("depends on"))
@@ -111,7 +125,7 @@ func (m Model) renderSummary() string {
 		if n == 0 {
 			return ""
 		}
-		return style.Render(fmt.Sprintf("%d %s", n, label)) + "  "
+		return style.Background(colPanelBg).Padding(0, 1).Bold(true).Render(fmt.Sprintf("%d %s", n, label)) + " "
 	}
 	out := seg(s.add, sm.Add, "to add") +
 		seg(s.upd, sm.Change, "to change") +
@@ -125,7 +139,7 @@ func (m Model) renderSummary() string {
 	out += s.faint.Render(fmt.Sprintf("· %d instances / %d blocks", m.g.TotalInstances(), m.g.TotalNodes()))
 
 	// Horizontal scroll indicator.
-	if m.mode == modeGraph && m.g.MaxLayer()+1 > m.visibleCols() {
+	if m.detailLines == nil && m.mode == modeGraph && m.g.MaxLayer()+1 > m.visibleCols() {
 		last := m.colScroll + m.visibleCols()
 		if last > m.g.MaxLayer()+1 {
 			last = m.g.MaxLayer() + 1
@@ -138,7 +152,7 @@ func (m Model) renderSummary() string {
 // --- footer -----------------------------------------------------------------
 
 func (m Model) renderFooter() string {
-	rule := m.styles.faint.Render(strings.Repeat("─", m.width))
+	rule := lipgloss.NewStyle().Foreground(colBorder).Render(strings.Repeat("─", m.width))
 	ctx := m.renderContext()
 	var bottom string
 	switch {
@@ -149,7 +163,8 @@ func (m Model) renderFooter() string {
 	default:
 		bottom = m.renderHints()
 	}
-	return pad(rule, m.width) + "\n" + pad(clipANSI(ctx, m.width), m.width) + "\n" + pad(clipANSI(bottom, m.width), m.width)
+	bar := renderSurface(m.styles.screen.Background(colPanelBg), padANSI(bottom, m.width))
+	return padANSI(rule, m.width) + "\n" + padANSI(ctx, m.width) + "\n" + bar
 }
 
 func (m Model) renderContext() string {
@@ -158,34 +173,77 @@ func (m Model) renderContext() string {
 		return m.styles.dim.Render("no selection")
 	}
 	act := n.ActionAgg()
+	label := n.Label()
+	if m.showStreams && n.Count() > 0 {
+		inst := n.Instances[m.shownInstance(n)]
+		act, label = inst.Action, inst.Address()
+	}
 	sym := lipgloss.NewStyle().Foreground(actionColor(act)).Bold(true).Render(act.Symbol())
 	word := lipgloss.NewStyle().Foreground(actionColor(act)).Render(act.Label())
-
-	addr := m.styles.text.Bold(true).Render(n.Label())
-	if n.Count() > 1 {
+	addr := m.styles.text.Bold(true).Render(label)
+	if !m.showStreams && n.Count() > 1 {
 		addr += m.styles.dim.Render(" ×" + strconv.Itoa(n.Count()))
 	}
 	out := sym + " " + addr + "  " + word
-	if len(n.DepsOut) > 0 {
-		out += m.styles.faint.Render("   depends on ") + m.styles.dim.Render(shortList(n.DepsOut, 3))
+	if m.showStreams && n.Count() > 0 {
+		up, upGroups := m.streamRelated(n, m.shownInstance(n), true)
+		down, downGroups := m.streamRelated(n, m.shownInstance(n), false)
+		out += m.streamContextLinks("depends on", up, upGroups)
+		out += m.streamContextLinks("used by", down, downGroups)
+	} else {
+		if len(n.DepsOut) > 0 {
+			out += m.styles.faint.Render("   depends on ") + m.styles.dim.Render(shortList(n.DepsOut, 3))
+		}
+		if len(n.DepsIn) > 0 {
+			out += m.styles.faint.Render("   used by ") + m.styles.dim.Render(shortList(n.DepsIn, 3))
+		}
 	}
-	if len(n.DepsIn) > 0 {
-		out += m.styles.faint.Render("   used by ") + m.styles.dim.Render(shortList(n.DepsIn, 3))
+	idx := -1
+	if m.showStreams && m.mode == modeGraph {
+		idx = m.shownInstance(n)
 	}
-	if !m.expanded[n.Block] {
+	if m.detailLines == nil && !m.expanded[cardExpansionKey(n, idx)] {
 		out += m.styles.faint.Render("   · space to expand")
 	}
 	return out
 }
 
 func (m Model) renderHints() string {
-	var keys string
-	if m.mode == modeGraph {
-		keys = "↑↓←→ move · space expand · t list · / search · u unchanged · n changes-only · ? help · q quit"
-	} else {
-		keys = "↑↓ move · space expand · t graph · / search · u unchanged · n changes-only · ? help · q quit"
+	shortcut := func(key, label string) string {
+		return m.styles.key.Render(key) + " " + m.styles.dim.Render(label)
 	}
-	return m.styles.faint.Render(keys)
+	tail := shortcut("?", "help") + "  " + shortcut("q", "quit")
+	if m.width <= lipgloss.Width(tail) {
+		return clipANSI(tail, m.width)
+	}
+	bindings := [][2]string{{"f", "inspect"}, {"a", "streams"}, {"↑↓←→", "move"}, {"Tab/⇧Tab", "instance"}, {"Space", "preview"}, {"/", "search"}, {"t", "list"}}
+	if m.mode == modeList {
+		bindings[2] = [2]string{"↑↓", "move"}
+		bindings[6][1] = "graph"
+	}
+	if m.detailLines != nil {
+		bindings = [][2]string{{"Esc", "back"}, {"a", "streams"}, {"↑↓", "scroll"}, {"←→", "levels"}, {"Tab/⇧Tab", "instance"}, {"PgUp/Dn", "page"}, {"u", "unchanged"}}
+	}
+	n := m.selectedNode()
+	available := m.width - lipgloss.Width(tail) - 2
+	var b strings.Builder
+	used := 0
+	for _, binding := range bindings {
+		if binding[1] == "instance" && (n == nil || n.Count() <= 1) {
+			continue
+		}
+		item := shortcut(binding[0], binding[1])
+		w := lipgloss.Width(item)
+		if used+w > available {
+			continue
+		}
+		b.WriteString(item)
+		b.WriteString("  ")
+		used += w + 2
+	}
+	b.WriteString(strings.Repeat(" ", max(0, m.width-used-lipgloss.Width(tail))))
+	b.WriteString(tail)
+	return b.String()
 }
 
 // --- helpers ----------------------------------------------------------------

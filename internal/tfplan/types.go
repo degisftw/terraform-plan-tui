@@ -101,6 +101,24 @@ type Resource struct {
 	forces  map[string]bool // memoized replace-forcing attribute paths
 }
 
+// Address returns the full Terraform address of this planned instance.
+func (r *Resource) Address() string {
+	if r.Index == "" {
+		return r.Block
+	}
+	return r.Block + "[" + r.Index + "]"
+}
+
+// InstanceDependency describes a configuration dependency on an upstream block.
+// Instances contains sorted, confirmed upstream instance addresses. Unresolved
+// means an additional relationship is known only at block scope. Configuration
+// references are shared by all instances of the downstream block, not paired by index.
+type InstanceDependency struct {
+	Block      string
+	Instances  []string
+	Unresolved bool
+}
+
 // Node is a resource block: one or more instances that share a config block and
 // therefore a position in the dependency graph.
 type Node struct {
@@ -110,8 +128,9 @@ type Node struct {
 	Module    string
 	Instances []*Resource
 
-	DepsOut []string // block addresses this node depends on (upstream)
-	DepsIn  []string // block addresses that depend on this node (downstream)
+	DepsOut      []string             // block addresses this node depends on (upstream)
+	DepsIn       []string             // block addresses that depend on this node (downstream)
+	InstanceDeps []InstanceDependency // upstream dependencies, sorted by Block
 
 	Layer int // column: 0 = no dependencies, grows rightward
 	Row   int // position within the layer
@@ -192,10 +211,22 @@ func formatIndex(v any) string {
 	}
 }
 
-// blockAddress strips a trailing instance index ("[...]") from an address.
+// blockAddress strips a trailing resource instance index, preserving module indexes.
 func blockAddress(addr string) string {
-	if i := strings.LastIndexByte(addr, '['); i >= 0 && strings.HasSuffix(addr, "]") {
-		return addr[:i]
+	for offset := 0; offset < len(addr); {
+		i := strings.IndexByte(addr[offset:], '[')
+		if i < 0 {
+			break
+		}
+		start := offset + i
+		end := referenceIndexEnd(addr[start:])
+		if end < 0 {
+			break
+		}
+		offset = start + end
+		if offset == len(addr) {
+			return addr[:start]
+		}
 	}
 	return addr
 }

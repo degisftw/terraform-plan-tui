@@ -36,10 +36,26 @@ change at once instead of reading a transcript.
 - **Expand in place.** Hit `space` on any resource to unfold its attribute diff,
   color-coded the way you'd expect: green additions, red removals, amber
   in-place changes, and `(known after apply)` for computed values.
+- **Read the whole resource.** Press `f` on the focused resource to enlarge and
+  center its card in the graph, keeping neighboring dependency layers and arrows
+  visible on the left and right. Long names and values wrap, and collections are
+  indented. Scroll through every attribute with `↑`/`↓` (`j`/`k`), `PgUp`/`PgDn`,
+  or `g`/`G`. Use `Tab` / `Shift+Tab` to cycle to the next / previous instance
+  in any view; `[` / `]` remain available. Inside the enlarged card, `←` / `→`
+  (`h` / `l`) move between dependency levels. Press `u` to include unchanged attributes.
+  Sensitive values remain redacted. Press `Esc` or `f` to restore the previous
+  layout and selection. Also available from list view.
+- **All instance streams.** Press `a` to toggle between grouped resource blocks
+  and individual instance cards. Confirmed upstream addresses stay explicit;
+  relationships without an instance mapping are marked `? block scope:` rather
+  than guessed from matching indexes. The toggle also works in the enlarged card.
 - **Built for small *and* large plans.** A six-resource plan and a
   400-instance, five-layer plan use the same view; columns scroll vertically,
   the layout scrolls horizontally, and a flat **list view** (`t`) plus a
   **changes-only** filter (`n`) keep big plans tractable.
+- **Readable by design.** A Posting-inspired palette pairs clear text with
+  indigo panels and an orchid focus accent. Light and dark terminal backgrounds
+  get matching palettes; unchanged resources and keyboard hints stay readable.
 
 ## Install
 
@@ -118,19 +134,51 @@ go run ./cmd/tfplantui examples/medium/plan.json
 | `↑ ↓` / `k j` | move within a dependency layer (column) |
 | `← →` / `h l` | move across layers, following dependency edges |
 | `space` / `enter` | expand / collapse the selected resource's diff |
+| `f` | enlarge / restore the focused card, keeping neighboring resources visible |
+| `a` | toggle all instance streams; opens the graph when used from the list |
+| `Esc` | close help or restore the enlarged card |
+| `↑ ↓` / `k j` (enlarged card) | scroll through attributes |
+| `← →` / `h l` (enlarged card) | move between dependency levels, keeping the card open |
+| `PgUp` / `PgDn` (enlarged card) | scroll a page (`Ctrl-U` / `Ctrl-D` also work) |
 | `[` `]` | cycle instances of a `count`/`for_each` resource |
+| `Tab` / `Shift+Tab` | next / previous instance in graph, list, and enlarged card |
 | `u` | show / hide unchanged attributes |
 | `n` | changes-only — hide `no-op` resources |
 | `x` | collapse everything |
 | `t` | switch between graph and list views |
-| `g` / `G` | jump to top / bottom of the column or list |
+| `g` / `G` | jump to top / bottom of the column, list, or enlarged card |
 | `/` | search by resource address (`Enter` jumps, `Esc` cancels) |
 | `?` | toggle help |
 | `q` / `Ctrl-C` | quit |
 
+## Instance streams
+
+With `a` enabled, every visible `count` / `for_each` instance gets its own card,
+action, and address. `↑` / `↓` walks the instance cards in a layer; `Tab` /
+`Shift+Tab` (or `[` / `]`) cycles within the selected resource block. Search can
+jump directly to an indexed address such as `random_integer.port[3]`.
+
+- **Confirmed links** come from explicit indexed references or an upstream block
+  with one planned instance. Visible adjacent columns draw these links; each
+  dependent card also names its confirmed upstream addresses, including links
+  outside the viewport or across non-adjacent layers. A shared rail can carry
+  several links, so the address annotations identify the individual targets.
+- **Grouped unknowns** are labeled `? block scope: <address>`. An unindexed
+  multi-instance reference or dynamic index does not establish a one-to-one
+  relationship. The UI never assumes that instance `[2]` depends on `[2]`.
+- `space` expands only the selected instance's preview. `n` hides unchanged
+  instances, and switching `a` off preserves the selected instance and the
+  previous compact previews.
+
+This remains a configuration-derived graph: expressions are shared by instances
+of their declaring block, not individually evaluated. Cross-module output
+references remain outside the current dependency parser, and expressions omitted
+from Terraform's JSON (such as dynamic blocks) cannot produce links.
+
+
 ## Color legend
 
-Color carries one thing — the **action** — so it stays legible at a glance:
+Action symbols and changed values use semantic colors so plans remain scannable:
 
 | Glyph | Meaning |
 |-------|---------|
@@ -139,16 +187,21 @@ Color carries one thing — the **action** — so it stays legible at a glance:
 | `-` red | destroy |
 | `~` amber | update in place |
 | `*` yellow | mixed — a `count`/`for_each` block whose instances differ |
-| `·` dim | no change (recedes into the background) |
+| `·` slate | no change (quieter, but still readable) |
 
-Everything else is deliberately neutral so it doesn't compete with the action colors:
+The interface separates focus from resource actions:
 
-- **The cursor** is a dark card with bright white text — it reads by contrast, not hue.
-- **Unchanged (no-op) resources** are dimmed almost to the background; they only
-  brighten when you move the cursor onto them.
-- **Dependencies are drawn on demand:** selecting a resource draws arrows from its
-  dependencies into it and out to its dependents (`─▶`), instead of recoloring
-  other nodes. The footer also lists them by name.
+- **The focused card** has an orchid border, a distinct surface, and a bold name.
+  Other cards keep neutral borders; their action symbols retain semantic colors.
+- **Attributes** use readable labels and neutral values. Before/after changes
+  use red and green, and computed values use amber.
+- **Unchanged resources** use readable secondary text rather than near-black text.
+- **The footer** shows contextual keycaps that fit the terminal width, with help
+  and quit kept visible. Press `?` for every shortcut.
+- **Light and dark palettes** are selected from the terminal background.
+- **Dependencies:** compact mode draws block connections for the selection.
+  Instance-stream mode draws confirmed references between visible instances and
+  annotates every dependent card with confirmed or unresolved upstream scope.
 
 ## Examples
 

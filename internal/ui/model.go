@@ -31,10 +31,16 @@ type Model struct {
 	listSel    int
 	listScroll int
 
+	// Non-nil while the focused card is enlarged. Rebuilt only when
+	// its content or width changes, so scrolling does not recompute the diff.
+	detailLines  []string
+	detailScroll int
+
 	expanded      map[string]bool
 	instanceIdx   map[string]int // block -> shown instance when expanded/multi
 	showUnchanged bool
 	hideNoOp      bool
+	showStreams   bool // all instance cards and dependency streams in the graph
 
 	searching bool
 	search    textinput.Model
@@ -163,9 +169,19 @@ func (m Model) selectedNode() *tfplan.Node {
 
 // shownInstance returns the instance index currently displayed for a block.
 func (m Model) shownInstance(n *tfplan.Node) int {
+	if n.Count() == 0 {
+		return 0
+	}
 	idx := m.instanceIdx[n.Block]
 	if idx < 0 || idx >= n.Count() {
-		return 0
+		idx = 0
+	}
+	if m.showStreams && m.hideNoOp && n.Instances[idx].Action == tfplan.ActionNoOp {
+		for i, inst := range n.Instances {
+			if inst.Action != tfplan.ActionNoOp {
+				return i
+			}
+		}
 	}
 	return idx
 }

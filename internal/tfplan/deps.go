@@ -2,35 +2,41 @@ package tfplan
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-// This file derives the block-level dependency edges from the plan's
-// configuration: which resource blocks reference which, and wiring those
-// references onto the graph as DepsOut/DepsIn.
+// A resourceReference retains the resource instance traversal when present.
+// Dynamic indexes remain literal traversal text, never an inferred pairing.
+type resourceReference struct {
+	block   string
+	index   string
+	indexed bool
+}
 
-// collectModuleDeps walks a configuration module (recursing into module calls),
-// recording for each resource block the set of resource blocks it references.
+// collectModuleDeps walks configuration resources and their expression references.
 // prefix is the module address prefix, e.g. "module.foo." for child modules.
-func collectModuleDeps(m rawConfigModule, prefix string, out map[string]map[string]bool) {
+func collectModuleDeps(m rawConfigModule, prefix string, out map[string]map[resourceReference]bool) {
 	for _, r := range m.Resources {
 		block := prefix + r.Address
 		set := out[block]
 		if set == nil {
-			set = map[string]bool{}
+			set = map[resourceReference]bool{}
 			out[block] = set
 		}
 		for _, expr := range r.Expressions {
 			for _, ref := range extractReferences(expr) {
-				if addr, ok := refToAddress(ref, prefix); ok && addr != block {
-					set[addr] = true
+				if dep, ok := parseReference(ref, prefix); ok && dep.block != block {
+					set[dep] = true
 				}
 			}
 		}
+		// depends_on is independent evidence, not an implied expression prefix.
 		for _, ref := range r.DependsOn {
-			if addr, ok := refToAddress(ref, prefix); ok && addr != block {
-				set[addr] = true
+			if dep, ok := parseReference(ref, prefix); ok && dep.block != block {
+				set[dep] = true
 			}
 		}
 	}
@@ -39,8 +45,10 @@ func collectModuleDeps(m rawConfigModule, prefix string, out map[string]map[stri
 	}
 }
 
-// extractReferences recursively pulls every string under any "references" array
-// in an expression value (which may be a scalar, object, or nested block list).
+// extractReferences recursively pulls references from expression values. Terraform
+// includes shorter traversal prefixes alongside each full reference. Remove those
+// only within their own references array, so independent ambiguous expressions or
+// nested blocks cannot be erased by an indexed reference elsewhere.
 func extractReferences(raw json.RawMessage) []string {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -52,17 +60,44 @@ func extractReferences(raw json.RawMessage) []string {
 		switch t := node.(type) {
 		case map[string]any:
 			if r, ok := t["references"].([]any); ok {
+				dynamicIndex := false
 				for _, e := range r {
-					if s, ok := e.(string); ok {
-						refs = append(refs, s)
+					if ref, ok := e.(string); ok {
+						root, _, _ := strings.Cut(ref, ".")
+						switch root {
+						case "var", "local", "each", "count", "module":
+							dynamicIndex = true
+						}
+					}
+				}
+				for _, e := range r {
+					ref, ok := e.(string)
+					if !ok {
+						continue
+					}
+					implied := false
+					for _, other := range r {
+						longer, ok := other.(string)
+						if ok && len(longer) > len(ref) && strings.HasPrefix(longer, ref) &&
+							(longer[len(ref)] == '.' || longer[len(ref)] == '[') {
+							// These may also encode a dynamic lookup whose index was
+							// omitted from the JSON traversal; keep its block scope.
+							if dynamicIndex && longer[len(ref)] == '[' && literalReferenceIndex(longer[len(ref):]) {
+								continue
+							}
+							implied = true
+							break
+						}
+					}
+					if !implied {
+						refs = append(refs, ref)
 					}
 				}
 			}
 			for k, child := range t {
-				if k == "references" {
-					continue
+				if k != "references" {
+					walk(child)
 				}
-				walk(child)
 			}
 		case []any:
 			for _, child := range t {
@@ -74,52 +109,139 @@ func extractReferences(raw json.RawMessage) []string {
 	return refs
 }
 
-// refToAddress maps a Terraform reference (e.g. "random_pet.app.id") to a
-// managed/data resource block address, honoring the current module prefix.
-// It returns ok=false for references that are not resources (var/local/etc).
-func refToAddress(ref, prefix string) (string, bool) {
-	parts := strings.Split(ref, ".")
-	if len(parts) < 2 {
-		return "", false
+// parseReference preserves the first resource index, including literal string
+// keys with dots or brackets. Dynamic indexes cannot match a planned literal index.
+// Cross-module outputs remain unsupported, matching the existing block graph's
+// module-local reference behavior.
+func parseReference(ref, prefix string) (resourceReference, bool) {
+	resourceType, rest, ok := strings.Cut(ref, ".")
+	if !ok {
+		return resourceReference{}, false
 	}
-	switch parts[0] {
-	case "var", "local", "each", "count", "path", "terraform", "self":
-		return "", false
-	case "module":
-		// Cross-module reference; intra-module edges are handled per-module.
-		return "", false
+	switch resourceType {
+	case "var", "local", "each", "count", "path", "terraform", "self", "module":
+		return resourceReference{}, false
 	case "data":
-		if len(parts) < 3 {
-			return "", false
+		dataType, remainder, ok := strings.Cut(rest, ".")
+		if !ok {
+			return resourceReference{}, false
 		}
-		return prefix + "data." + stripIndex(parts[1]) + "." + stripIndex(parts[2]), true
-	default:
-		return prefix + stripIndex(parts[0]) + "." + stripIndex(parts[1]), true
+		resourceType = "data." + dataType
+		rest = remainder
 	}
+	nameEnd := strings.IndexAny(rest, ".[")
+	if nameEnd < 0 {
+		nameEnd = len(rest)
+	}
+	if nameEnd == 0 {
+		return resourceReference{}, false
+	}
+	dep := resourceReference{block: prefix + resourceType + "." + rest[:nameEnd]}
+	if nameEnd < len(rest) && rest[nameEnd] == '[' {
+		index := rest[nameEnd:]
+		dep.indexed = true
+		if end := referenceIndexEnd(index); end >= 0 {
+			dep.index = index[1 : end-1]
+		} else {
+			dep.index = index
+		}
+	}
+	return dep, true
 }
 
-func stripIndex(s string) string {
-	if i := strings.IndexByte(s, '['); i >= 0 {
-		return s[:i]
+// referenceIndexEnd returns the byte after a complete bracket traversal, ignoring
+// brackets inside quoted keys and supporting nested dynamic index expressions.
+func referenceIndexEnd(s string) int {
+	depth := 0
+	quoted, escaped := false, false
+	for i := range len(s) {
+		c := s[i]
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			quoted = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
 	}
-	return s
+	return -1
 }
 
-// applyEdges wires DepsOut/DepsIn on nodes from the block->upstream map, keeping
-// only edges whose endpoints both exist in the plan.
-func (g *Graph) applyEdges(deps map[string]map[string]bool) {
-	for block, set := range deps {
+func literalReferenceIndex(s string) bool {
+	end := referenceIndexEnd(s)
+	if end < 0 {
+		return false
+	}
+	index := s[1 : end-1]
+	if strings.HasPrefix(index, "\"") {
+		_, err := strconv.Unquote(index)
+		return err == nil
+	}
+	_, err := strconv.ParseUint(index, 10, 64)
+	return err == nil
+}
+
+// applyEdges retains the legacy block graph and adds confirmed instance addresses
+// plus an explicit marker for any relationships that remain block-scoped.
+func (g *Graph) applyEdges(deps map[string]map[resourceReference]bool) {
+	for block, refs := range deps {
 		node := g.ByBlock[block]
 		if node == nil {
 			continue
 		}
-		for up := range set {
-			if g.ByBlock[up] == nil {
+		grouped := map[string]*InstanceDependency{}
+		for ref := range refs {
+			upstream := g.ByBlock[ref.block]
+			if upstream == nil {
 				continue
 			}
-			node.DepsOut = append(node.DepsOut, up)
-			g.ByBlock[up].DepsIn = append(g.ByBlock[up].DepsIn, block)
+			dep := grouped[ref.block]
+			if dep == nil {
+				dep = &InstanceDependency{Block: ref.block}
+				grouped[ref.block] = dep
+			}
+			address := ""
+			if !ref.indexed {
+				if len(upstream.Instances) == 1 {
+					address = upstream.Instances[0].Address()
+				}
+			} else {
+				for _, instance := range upstream.Instances {
+					if instance.Index != "" && instance.Index == ref.index {
+						address = instance.Address()
+						break
+					}
+				}
+			}
+			if address == "" {
+				dep.Unresolved = true
+			} else if !slices.Contains(dep.Instances, address) {
+				dep.Instances = append(dep.Instances, address)
+			}
 		}
+		for _, dep := range grouped {
+			sort.Strings(dep.Instances)
+			node.InstanceDeps = append(node.InstanceDeps, *dep)
+			node.DepsOut = append(node.DepsOut, dep.Block)
+			g.ByBlock[dep.Block].DepsIn = append(g.ByBlock[dep.Block].DepsIn, block)
+		}
+		sort.Slice(node.InstanceDeps, func(i, j int) bool {
+			return node.InstanceDeps[i].Block < node.InstanceDeps[j].Block
+		})
 	}
 	for _, n := range g.Nodes {
 		sort.Strings(n.DepsOut)

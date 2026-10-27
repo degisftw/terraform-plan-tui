@@ -86,9 +86,9 @@ func (m Model) renderListItem(n *tfplan.Node, selected bool, w int) []string {
 	switch {
 	case selected:
 		bar = m.styles.accent.Render("▌ ")
-		labelStyle = m.styles.accent // bright white
+		labelStyle = m.styles.text.Bold(true)
 	case act == tfplan.ActionNoOp:
-		labelStyle = m.styles.faint // unimpacted rows recede
+		labelStyle = m.styles.faint
 	}
 
 	badge := ""
@@ -106,13 +106,17 @@ func (m Model) renderListItem(n *tfplan.Node, selected bool, w int) []string {
 	}
 
 	row := bar + sym + " " + labelStyle.Render(n.Label()) + badge + "   " + word + hint
-	out := []string{clipANSI(row, w)}
+	row = clipANSI(row, w)
+	if selected {
+		row = renderSurface(m.styles.screen.Background(colSelBg), padANSI(row, w))
+	}
+	out := []string{row}
 
 	if m.expanded[n.Block] {
 		idx := m.shownInstance(n)
 		inst := n.Instances[idx]
 		if n.Count() > 1 {
-			out = append(out, m.styles.faint.Render(fmt.Sprintf("      instance %d/%d (%s)  [ ] to cycle", idx+1, n.Count(), inst.Action.Label())))
+			out = append(out, m.styles.faint.Render(fmt.Sprintf("      instance %d/%d (%s)  [ ] / Tab to cycle", idx+1, n.Count(), inst.Action.Label())))
 		}
 		diff := inst.Diff(m.showUnchanged)
 		if len(diff) == 0 {

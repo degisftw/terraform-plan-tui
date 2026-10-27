@@ -44,7 +44,7 @@ func Parse(data []byte) (*Graph, error) {
 	}
 
 	// 2. Dependency edges from the configuration's expression references.
-	deps := map[string]map[string]bool{} // block -> set of upstream blocks
+	deps := map[string]map[resourceReference]bool{}
 	collectModuleDeps(raw.Configuration.RootModule, "", deps)
 	g.applyEdges(deps)
 
