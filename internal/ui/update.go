@@ -10,6 +10,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
 		m.ensureColVisible()
+		if m.detailLines != nil {
+			m.rebuildDetail()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -32,7 +35,18 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		q := m.search.Value()
 		m.searching = false
 		m.search.Blur()
-		if c, r, ok := m.g.Search(q, m.col, m.row); ok {
+		var c, r int
+		var ok bool
+		if m.showStreams {
+			var idx int
+			c, r, idx, ok = m.searchStream(q)
+			if ok {
+				m.instanceIdx[m.g.At(c, r).Block] = idx
+			}
+		} else {
+			c, r, ok = m.g.Search(q, m.col, m.row)
+		}
+		if ok {
 			m.mode = modeGraph
 			m.col, m.row = c, r
 			m.snapSelection()
@@ -50,6 +64,9 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.detailLines != nil {
+		return m.updateDetail(msg)
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -62,6 +79,10 @@ func (m Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		m.showHelp = !m.showHelp
+		return m, nil
+
+	case "a":
+		m.toggleStreams()
 		return m, nil
 
 	case "/":
@@ -97,14 +118,19 @@ func (m Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.expanded = map[string]bool{}
 		return m, nil
 
+	case "f":
+		m.detailScroll = 0
+		m.rebuildDetail()
+		return m, nil
+
 	case " ", "space", "enter":
 		m.toggleExpand()
 		return m, nil
 
-	case "[":
+	case "[", "shift+tab":
 		m.cycleInstance(-1)
 		return m, nil
-	case "]":
+	case "]", "tab":
 		m.cycleInstance(1)
 		return m, nil
 	}
@@ -130,10 +156,12 @@ func (m Model) updateGraphNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g", "home":
 		if rows := m.visibleRows(m.col); len(rows) > 0 {
 			m.row = rows[0]
+			m.selectStreamEnd(false)
 		}
 	case "G", "end":
 		if rows := m.visibleRows(m.col); len(rows) > 0 {
 			m.row = rows[len(rows)-1]
+			m.selectStreamEnd(true)
 		}
 	case "pgup":
 		for i := 0; i < 5; i++ {
@@ -148,18 +176,40 @@ func (m Model) updateGraphNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) moveUp() {
+	if m.showStreams {
+		n := m.g.At(m.col, m.row)
+		if n != nil {
+			instances := m.visibleInstanceIndices(n)
+			if i := indexOf(instances, m.shownInstance(n)); i > 0 {
+				m.instanceIdx[n.Block] = instances[i-1]
+				return
+			}
+		}
+	}
 	rows := m.visibleRows(m.col)
 	i := indexOf(rows, m.row)
 	if i > 0 {
 		m.row = rows[i-1]
+		m.selectStreamEnd(true)
 	}
 }
 
 func (m *Model) moveDown() {
+	if m.showStreams {
+		n := m.g.At(m.col, m.row)
+		if n != nil {
+			instances := m.visibleInstanceIndices(n)
+			if i := indexOf(instances, m.shownInstance(n)); i >= 0 && i < len(instances)-1 {
+				m.instanceIdx[n.Block] = instances[i+1]
+				return
+			}
+		}
+	}
 	rows := m.visibleRows(m.col)
 	i := indexOf(rows, m.row)
 	if i >= 0 && i < len(rows)-1 {
 		m.row = rows[i+1]
+		m.selectStreamEnd(false)
 	}
 }
 
@@ -255,12 +305,26 @@ func (m *Model) toggleExpand() {
 	if n == nil {
 		return
 	}
-	m.expanded[n.Block] = !m.expanded[n.Block]
+	idx := -1
+	if m.showStreams && m.mode == modeGraph {
+		idx = m.shownInstance(n)
+	}
+	key := cardExpansionKey(n, idx)
+	m.expanded[key] = !m.expanded[key]
 }
 
 func (m *Model) cycleInstance(delta int) {
 	n := m.selectedNode()
 	if n == nil || n.Count() <= 1 {
+		return
+	}
+	if m.showStreams && m.hideNoOp {
+		instances := m.visibleInstanceIndices(n)
+		if len(instances) == 0 {
+			return
+		}
+		pos := indexOf(instances, m.shownInstance(n))
+		m.instanceIdx[n.Block] = instances[(pos+delta+len(instances))%len(instances)]
 		return
 	}
 	idx := m.shownInstance(n) + delta

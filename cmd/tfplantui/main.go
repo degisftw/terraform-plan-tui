@@ -31,6 +31,10 @@ FLAGS
 KEYS (in the TUI)
   arrows/hjkl  navigate the dependency graph (←→ follows edges across layers)
   space        expand/collapse a resource to see its before→after diff
+  f            enlarge centered card, keeping neighbors visible; Esc restores
+  left/right   move between dependency levels, including enlarged card (h/l too)
+  Tab/S-Tab    next/previous instance in any view ([/] still work)
+  a            all instance streams on/off; ? block scope marks unknown mappings
   t            toggle graph / list view      n   changes-only (hide no-op)
   u            show/hide unchanged attrs      /   search        ?  help   q  quit
 
